@@ -77,6 +77,13 @@ func TestUpdateContention(t *testing.T) {
 		}(i)
 	}
 
+	cache.GetOrElseUpdate("unrelated", min, func() (interface{}, error) {
+		//this should run concurrently with the go-routines from the loop above if
+		// entry level locking works properly
+		time.Sleep(100 * time.Millisecond)
+		return 0, nil
+	})
+
 	wg.Wait()
 
 	val := cache.Get("foo")

@@ -7,21 +7,22 @@ import (
 
 type TtlCache struct {
 	gcInterval time.Duration
-	cache      map[string]ttlCacheEntry
+	cache      map[string]*ttlCacheEntry
 	lock       *sync.RWMutex
 	exit       chan struct{}
 }
 
 type ttlCacheEntry struct {
-	value     interface{}
-	timestamp *time.Time
+	value  interface{}
+	expiry *time.Time
+	lock   *sync.RWMutex
 }
 
 func NewTtlCache(gcInterval time.Duration) *TtlCache {
 	var lock sync.RWMutex
 	cache := &TtlCache{
 		gcInterval: gcInterval,
-		cache:      make(map[string]ttlCacheEntry),
+		cache:      make(map[string]*ttlCacheEntry),
 		lock:       &lock,
 		exit:       make(chan struct{}, 1),
 	}
@@ -45,7 +46,7 @@ func (cache *TtlCache) startCleaner() {
 		case now := <-ticker.C:
 			cache.lock.Lock()
 			for id, entry := range cache.cache {
-				if entry.timestamp.Before(now) {
+				if entry.expiry.Before(now) {
 					delete(cache.cache, id)
 				}
 			}
@@ -55,41 +56,59 @@ func (cache *TtlCache) startCleaner() {
 	}
 }
 
-func (cache *TtlCache) unsafeGet(id string) interface{} {
-	value, ok := cache.cache[id]
-	if ok && value.timestamp.After(time.Now()) {
-		return value.value
-	} else {
-		return nil
+func (cache *TtlCache) ensureEntry(id string) (entry *ttlCacheEntry) {
+	cache.lock.RLock()
+	entry, ok := cache.cache[id]
+	cache.lock.RUnlock()
+	if ok {
+		return
 	}
-}
-
-func (cache *TtlCache) unsafeSet(id string, value interface{}, ttl time.Duration) {
-	expiry := time.Now().Add(ttl)
-	entry := ttlCacheEntry{value, &expiry}
+	cache.lock.Lock()
+	defer cache.lock.Unlock()
+	entry, ok = cache.cache[id]
+	if ok {
+		return
+	}
+	var lock sync.RWMutex
+	entry = &ttlCacheEntry{lock: &lock}
 	cache.cache[id] = entry
-}
-
-func (cache *TtlCache) unsafeDelete(id string) {
-	delete(cache.cache, id)
+	return
 }
 
 func (cache *TtlCache) Get(id string) interface{} {
 	cache.lock.RLock()
 	defer cache.lock.RUnlock()
-	return cache.unsafeGet(id)
+	entry, ok := cache.cache[id]
+	if !ok {
+		return nil
+	}
+
+	entry.lock.RLock()
+	defer entry.lock.RUnlock()
+
+	if ok && entry.expiry.After(time.Now()) {
+		return entry.value
+	} else {
+		return nil
+	}
 }
 
 func (cache *TtlCache) Set(id string, value interface{}, ttl time.Duration) {
-	cache.lock.Lock()
-	defer cache.lock.Unlock()
-	cache.unsafeSet(id, value, ttl)
+	expiry := time.Now().Add(ttl)
+	entry := cache.ensureEntry(id)
+
+	entry.lock.Lock()
+	defer entry.lock.Unlock()
+
+	entry.value = value
+	entry.expiry = &expiry
 }
 
 func (cache *TtlCache) Delete(id string) {
 	cache.lock.Lock()
 	defer cache.lock.Unlock()
-	cache.unsafeDelete(id)
+
+	delete(cache.cache, id)
 }
 
 func (cache *TtlCache) GetOrElseUpdate(id string, ttl time.Duration,
@@ -100,15 +119,20 @@ func (cache *TtlCache) GetOrElseUpdate(id string, ttl time.Duration,
 		return
 	}
 
-	cache.lock.Lock()
-	defer cache.lock.Unlock()
+	entry := cache.ensureEntry(id)
+	entry.lock.Lock()
+	defer entry.lock.Unlock()
 
-	value = cache.unsafeGet(id)
-	if value != nil {
-		return
+	if entry.value != nil && entry.expiry != nil && entry.expiry.After(time.Now()) {
+		return entry.value, nil
+	} else {
+		value, err = create()
+		if err != nil {
+			return
+		}
+		entry.value = value
+		expiry := time.Now().Add(ttl)
+		entry.expiry = &expiry
 	}
-
-	value, err = create()
-	cache.unsafeSet(id, value, ttl)
 	return
 }
