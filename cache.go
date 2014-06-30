@@ -38,12 +38,18 @@ func (cache *TtlCache) Close() {
 }
 
 func (cache *TtlCache) startCleaner() {
+	if cache == nil {
+		return
+	}
 	ticker := time.NewTicker(cache.gcInterval)
 	for {
 		select {
 		case _ = <-cache.exit:
 			ticker.Stop()
 		case now := <-ticker.C:
+			if cache == nil {
+				return
+			}
 			cache.lock.Lock()
 			for id, entry := range cache.cache {
 				if entry.expiry.Before(now) {
