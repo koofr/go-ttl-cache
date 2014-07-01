@@ -91,3 +91,23 @@ func TestUpdateContention(t *testing.T) {
 		t.Error("val should be 0 but is ", val)
 	}
 }
+
+func TestNonCaching(t *testing.T) {
+	cache := NewTtlCache(min)
+	defer cache.Close()
+
+	val, err := cache.GetOrElseUpdate("foo", min, func() (interface{}, error) {
+		return nil, DoNotCache{123}
+	})
+	if err != nil {
+		t.Error(err)
+	}
+	if val != 123 {
+		t.Error("val should be 123 but is ", val)
+	}
+
+	val = cache.Get("foo")
+	if val != nil {
+		t.Error("val should not be defined")
+	}
+}

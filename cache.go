@@ -134,11 +134,35 @@ func (cache *TtlCache) GetOrElseUpdate(id string, ttl time.Duration,
 	} else {
 		value, err = create()
 		if err != nil {
+			nonCached, ok := IsDoNotCache(err)
+			if ok {
+				expiry := time.Unix(0, 0)
+				entry.expiry = &expiry //will be GCed if nobody else is using it
+				value = nonCached
+				err = nil
+			}
 			return
 		}
 		entry.value = value
 		expiry := time.Now().Add(ttl)
 		entry.expiry = &expiry
 	}
+	return
+}
+
+type DoNotCache struct {
+	Value interface{}
+}
+
+func (d DoNotCache) Error() string {
+	return "This contains an uncachable value"
+}
+
+func IsDoNotCache(err error) (value interface{}, ok bool) {
+	dnc, ok := err.(DoNotCache)
+	if !ok {
+		return
+	}
+	value = dnc.Value
 	return
 }
