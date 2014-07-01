@@ -92,7 +92,7 @@ func (cache *TtlCache) Get(id string) interface{} {
 	entry.lock.RLock()
 	defer entry.lock.RUnlock()
 
-	if ok && entry.expiry.After(time.Now()) {
+	if ok && entry.expiry != nil && entry.expiry.After(time.Now()) {
 		return entry.value
 	} else {
 		return nil
