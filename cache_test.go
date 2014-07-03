@@ -111,3 +111,37 @@ func TestNonCaching(t *testing.T) {
 		t.Error("val should not be defined")
 	}
 }
+
+func TestCleaner(t *testing.T) {
+	cache := NewTtlCache(500 * time.Millisecond)
+	defer cache.Close()
+
+	if _, ok := cache.cache["foo"]; ok {
+		t.Error("val should not be defined")
+	}
+
+	go func() {
+		cache.GetOrElseUpdate("foo", 250*time.Millisecond, func() (interface{}, error) {
+			time.Sleep(1000 * time.Millisecond)
+			return "bar", nil
+		})
+	}()
+
+	time.Sleep(80 * time.Millisecond)
+
+	if _, ok := cache.cache["foo"]; !ok {
+		t.Error("val should be defined")
+	}
+
+	time.Sleep(700 * time.Millisecond)
+
+	if _, ok := cache.cache["foo"]; !ok {
+		t.Error("val should be defined")
+	}
+
+	time.Sleep(1 * time.Second)
+
+	if _, ok := cache.cache["foo"]; ok {
+		t.Error("val should not be defined")
+	}
+}

@@ -52,7 +52,7 @@ func (cache *TtlCache) startCleaner() {
 			}
 			cache.lock.Lock()
 			for id, entry := range cache.cache {
-				if entry.expiry.Before(now) {
+				if entry.expiry != nil && entry.expiry.Before(now) {
 					delete(cache.cache, id)
 				}
 			}
