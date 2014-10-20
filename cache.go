@@ -41,6 +41,9 @@ func (cache *TtlCache) startCleaner() {
 	if cache == nil {
 		return
 	}
+	if cache.gcInterval < 1 {
+		return
+	}
 	ticker := time.NewTicker(cache.gcInterval)
 	for {
 		select {

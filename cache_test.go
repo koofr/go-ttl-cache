@@ -145,3 +145,15 @@ func TestCleaner(t *testing.T) {
 		t.Error("val should not be defined")
 	}
 }
+
+func TestDisabledCleaner(t *testing.T) {
+	cache := NewTtlCache(0)
+	defer cache.Close()
+
+	cache.Set("foo", 123, 0)
+
+	val := cache.Get("foo")
+	if val != nil {
+		t.Error("val should not be defined")
+	}
+}
