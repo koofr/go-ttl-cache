@@ -52,6 +52,55 @@ func TestCaching(t *testing.T) {
 	}
 }
 
+func TestDisabledCaching(t *testing.T) {
+	cache := NewTtlCache(min)
+	defer cache.Close()
+
+	val := cache.Get("foo")
+	if val != nil {
+		t.Error("val should not be defined at start")
+	}
+
+	cache.Set("foo", 123, 0)
+
+	val = cache.Get("foo")
+	if val != nil {
+		t.Error("val should not be defined")
+	}
+
+	cache.Delete("foo")
+	val = cache.Get("foo")
+	if val != nil {
+		t.Error("val should not be defined after deletion")
+	}
+
+	val, err := cache.GetOrElseUpdate("foo", 0, func() (interface{}, error) {
+		return "new value", nil
+	})
+	if err != nil {
+		t.Error(err)
+	}
+	if val != "new value" {
+		t.Error("val should be 'new value' but is ", val)
+	}
+
+	called := false
+
+	val, err = cache.GetOrElseUpdate("foo", 0, func() (interface{}, error) {
+		called = true
+		return "new value", nil
+	})
+	if err != nil {
+		t.Error(err)
+	}
+	if val != "new value" {
+		t.Error("val should be 'new value' but is ", val)
+	}
+	if !called {
+		t.Error("producer was not run again")
+	}
+}
+
 func TestUpdateContention(t *testing.T) {
 	cache := NewTtlCache(min)
 	defer cache.Close()
