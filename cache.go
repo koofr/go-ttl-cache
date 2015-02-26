@@ -1,21 +1,38 @@
 package ttlcache
 
 import (
+	"reflect"
 	"sync"
 	"time"
 )
+
+type ttlCacheEntry struct {
+	value  interface{}
+	expiry *time.Time
+	lock   *sync.RWMutex
+}
+
+func (e *ttlCacheEntry) Close() {
+	i := e.value
+	if i == nil {
+		return
+	}
+	method := reflect.ValueOf(i).MethodByName("Close")
+	if !method.IsValid() {
+		return
+	}
+	c, ok := method.Interface().(func())
+	if !ok {
+		return
+	}
+	c()
+}
 
 type TtlCache struct {
 	gcInterval time.Duration
 	cache      map[string]*ttlCacheEntry
 	lock       *sync.RWMutex
 	exit       chan struct{}
-}
-
-type ttlCacheEntry struct {
-	value  interface{}
-	expiry *time.Time
-	lock   *sync.RWMutex
 }
 
 func NewTtlCache(gcInterval time.Duration) *TtlCache {
@@ -41,27 +58,33 @@ func (cache *TtlCache) startCleaner() {
 	if cache == nil {
 		return
 	}
-	if cache.gcInterval < 1 {
-		return
-	}
-	ticker := time.NewTicker(cache.gcInterval)
-	for {
-		select {
-		case _ = <-cache.exit:
-			ticker.Stop()
-		case now := <-ticker.C:
-			if cache == nil {
+	if cache.gcInterval > 0 {
+		ticker := time.NewTicker(cache.gcInterval)
+		for {
+			select {
+			case _ = <-cache.exit:
+				ticker.Stop()
 				return
-			}
-			cache.lock.Lock()
-			for id, entry := range cache.cache {
-				if entry.expiry != nil && entry.expiry.Before(now) {
-					delete(cache.cache, id)
+			case now := <-ticker.C:
+				if cache == nil {
+					return
 				}
+				cache.lock.Lock()
+				for id, entry := range cache.cache {
+					if entry.expiry != nil && entry.expiry.Before(now) {
+						entry.Close()
+						delete(cache.cache, id)
+					}
+				}
+				cache.lock.Unlock()
 			}
-			cache.lock.Unlock()
 		}
-
+	} else {
+		<-cache.exit
+	}
+	for id, entry := range cache.cache {
+		entry.Close()
+		delete(cache.cache, id)
 	}
 }
 
@@ -109,6 +132,7 @@ func (cache *TtlCache) Set(id string, value interface{}, ttl time.Duration) {
 	entry.lock.Lock()
 	defer entry.lock.Unlock()
 
+	entry.Close() // close potential existing
 	entry.value = value
 	entry.expiry = &expiry
 }
@@ -117,6 +141,11 @@ func (cache *TtlCache) Delete(id string) {
 	cache.lock.Lock()
 	defer cache.lock.Unlock()
 
+	elem, ok := cache.cache[id]
+	if !ok {
+		return
+	}
+	elem.Close()
 	delete(cache.cache, id)
 }
 
@@ -146,6 +175,7 @@ func (cache *TtlCache) GetOrElseUpdate(id string, ttl time.Duration,
 			}
 			return
 		}
+		entry.Close()
 		entry.value = value
 		expiry := time.Now().Add(ttl)
 		entry.expiry = &expiry

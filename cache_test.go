@@ -8,6 +8,14 @@ import (
 
 const min = 1 * time.Minute
 
+type Closer struct {
+	closed bool
+}
+
+func (c *Closer) Close() {
+	c.closed = true
+}
+
 func TestCaching(t *testing.T) {
 	cache := NewTtlCache(min)
 	defer cache.Close()
@@ -206,3 +214,127 @@ func TestDisabledCleaner(t *testing.T) {
 		t.Error("val should not be defined")
 	}
 }
+
+func TestCloseOnDelete(t *testing.T) {
+	cache := NewTtlCache(min)
+	defer cache.Close()
+
+	c := &Closer{false}
+	cache.Set("foo", c, min)
+	if cache.Get("foo").(*Closer).closed {
+		t.Error("foo should not be closed")
+	}
+	if c.closed {
+		t.Error("c should not be closed")
+	}
+
+	cache.Delete("foo")
+	if !c.closed {
+		t.Error("c should be closed")
+	}
+	if cache.Get("foo") != nil {
+		t.Error("foo should not be gettable")
+	}
+}
+
+func TestCloseOnTimeout(t *testing.T) {
+	cache := NewTtlCache(1)
+	defer cache.Close()
+
+	c := &Closer{false}
+	cache.Set("foo", c, 0)
+	time.Sleep(50 * time.Millisecond)
+	if !c.closed {
+		t.Error("c should be closed")
+	}
+}
+
+func TestCloseOnSetOverride(t *testing.T) {
+	cache := NewTtlCache(0)
+	defer cache.Close()
+
+	c1 := &Closer{false}
+	c2 := &Closer{false}
+
+	cache.Set("foo", c1, min)
+
+	if cache.Get("foo").(*Closer).closed {
+		t.Error("foo should not be closed")
+	}
+	if c1.closed {
+		t.Error("c1 should not be closed")
+	}
+
+	cache.Set("foo", c2, min)
+
+	if cache.Get("foo").(*Closer).closed {
+		t.Error("foo should not be closed")
+	}
+	if !c1.closed {
+		t.Error("c1 should be closed")
+	}
+	if c2.closed {
+		t.Error("c2 should not be closed")
+	}
+}
+
+func TestCloseOnGetOrElseUpdateTimeout(t *testing.T) {
+	cache := NewTtlCache(0)
+	defer cache.Close()
+
+	c1 := &Closer{false}
+	c2 := &Closer{false}
+
+	cache.Set("foo", c1, 0)
+	time.Sleep(10 * time.Millisecond)
+
+	if c1.closed {
+		t.Error("c1 should not be closed")
+	}
+	cache.GetOrElseUpdate("foo", min,
+		func() (interface{}, error) {
+			return c2, nil
+		})
+
+	if cache.Get("foo").(*Closer).closed {
+		t.Error("foo should not be closed")
+	}
+	if !c1.closed {
+		t.Error("c1 should be closed")
+	}
+	if c2.closed {
+		t.Error("c2 should not be closed")
+	}
+}
+
+func TestCloseOnCacheClose(t *testing.T) {
+	cache := NewTtlCache(0)
+
+	c1 := &Closer{false}
+	c2 := &Closer{false}
+
+	cache.Set("1", c1, 0)
+	cache.Set("2", c2, min)
+	time.Sleep(50 * time.Millisecond)
+
+	if c1.closed {
+		t.Error("c1 should not be closed")
+	}
+
+	if c2.closed {
+		t.Error("c2 should not be closed")
+	}
+
+	cache.Close()
+	time.Sleep(50 * time.Millisecond)
+
+	if !c1.closed {
+		t.Error("c1 should be closed")
+	}
+
+	if !c2.closed {
+		t.Error("c2 should be closed")
+	}
+}
+
+// cache close
