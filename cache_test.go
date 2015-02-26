@@ -12,8 +12,9 @@ type Closer struct {
 	closed bool
 }
 
-func (c *Closer) Close() {
+func (c *Closer) Close() error {
 	c.closed = true
+	return nil
 }
 
 func TestCaching(t *testing.T) {

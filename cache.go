@@ -1,7 +1,7 @@
 package ttlcache
 
 import (
-	"reflect"
+	"io"
 	"sync"
 	"time"
 )
@@ -13,19 +13,10 @@ type ttlCacheEntry struct {
 }
 
 func (e *ttlCacheEntry) Close() {
-	i := e.value
-	if i == nil {
-		return
+	c, ok := e.value.(io.Closer)
+	if ok {
+		c.Close()
 	}
-	method := reflect.ValueOf(i).MethodByName("Close")
-	if !method.IsValid() {
-		return
-	}
-	c, ok := method.Interface().(func())
-	if !ok {
-		return
-	}
-	c()
 }
 
 type TtlCache struct {
