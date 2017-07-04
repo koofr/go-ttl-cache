@@ -100,8 +100,9 @@ func (cache *TtlCache) ensureEntry(id string) (entry *ttlCacheEntry) {
 
 func (cache *TtlCache) Get(id string) interface{} {
 	cache.lock.RLock()
-	defer cache.lock.RUnlock()
 	entry, ok := cache.cache[id]
+	cache.lock.RUnlock()
+
 	if !ok {
 		return nil
 	}
@@ -130,14 +131,19 @@ func (cache *TtlCache) Set(id string, value interface{}, ttl time.Duration) {
 
 func (cache *TtlCache) Delete(id string) {
 	cache.lock.Lock()
-	defer cache.lock.Unlock()
 
 	elem, ok := cache.cache[id]
 	if !ok {
+		cache.lock.Unlock()
+
 		return
 	}
-	elem.Close()
+
 	delete(cache.cache, id)
+
+	cache.lock.Unlock()
+
+	elem.Close()
 }
 
 func (cache *TtlCache) GetOrElseUpdate(id string, ttl time.Duration,

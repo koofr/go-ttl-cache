@@ -150,6 +150,70 @@ func TestUpdateContention(t *testing.T) {
 	}
 }
 
+func TestGetOrElseUpdateLocking(t *testing.T) {
+	cache := NewTtlCache(min)
+	defer cache.Close()
+
+	foo1Updating := make(chan bool)
+	foo1Continue := make(chan bool)
+	foo1Done := make(chan bool)
+	foo2Before := make(chan bool)
+	foo2Done := make(chan bool)
+
+	go func() {
+		val, err := cache.GetOrElseUpdate("foo", min, func() (interface{}, error) {
+			foo1Updating <- true
+
+			<-foo1Continue
+
+			return 0, nil
+		})
+		if err != nil {
+			t.Error(err)
+		}
+		if val != 0 {
+			t.Error("val should be 0 but is ", val)
+		}
+
+		foo1Done <- true
+	}()
+
+	go func() {
+		<-foo1Updating
+
+		foo2Before <- true
+
+		val, err := cache.GetOrElseUpdate("foo", min, func() (interface{}, error) {
+			return 1, nil
+		})
+		if err != nil {
+			t.Error(err)
+		}
+		if val != 0 {
+			t.Error("val should be 0 but is ", val)
+		}
+
+		foo2Done <- true
+	}()
+
+	<-foo2Before
+
+	val, err := cache.GetOrElseUpdate("bar", min, func() (interface{}, error) {
+		return 42, nil
+	})
+	if err != nil {
+		t.Error(err)
+	}
+	if val != 42 {
+		t.Error("val should be 42 but is ", val)
+	}
+
+	foo1Continue <- true
+
+	<-foo1Done
+	<-foo2Done
+}
+
 func TestNonCaching(t *testing.T) {
 	cache := NewTtlCache(min)
 	defer cache.Close()
