@@ -28,6 +28,8 @@ type TtlCache struct {
 	cache      map[string]*ttlCacheEntry
 	lock       *sync.RWMutex
 	exit       chan struct{}
+	exited     chan struct{}
+	isClosed   bool
 }
 
 func NewTtlCache(gcInterval time.Duration) *TtlCache {
@@ -37,16 +39,28 @@ func NewTtlCache(gcInterval time.Duration) *TtlCache {
 		cache:      make(map[string]*ttlCacheEntry),
 		lock:       &lock,
 		exit:       make(chan struct{}, 1),
+		exited:     make(chan struct{}, 1),
+		isClosed:   false,
 	}
 	go cache.startCleaner()
 	return cache
 }
 
 func (cache *TtlCache) Close() {
-	select {
-	case cache.exit <- struct{}{}:
-	default:
+	cache.lock.RLock()
+	isClosed := cache.isClosed
+	cache.lock.RUnlock()
+
+	if isClosed {
+		return
 	}
+
+	cache.lock.Lock()
+	cache.isClosed = true
+	cache.lock.Unlock()
+
+	cache.exit <- struct{}{}
+	<-cache.exited
 }
 
 func (cache *TtlCache) startCleaner() {
@@ -55,18 +69,23 @@ func (cache *TtlCache) startCleaner() {
 	}
 	if cache.gcInterval > 0 {
 		ticker := time.NewTicker(cache.gcInterval)
+	gcLoop:
 		for {
 			select {
 			case _ = <-cache.exit:
 				ticker.Stop()
-				return
+				break gcLoop
 			case now := <-ticker.C:
 				if cache == nil {
 					return
 				}
 				cache.lock.Lock()
 				for id, entry := range cache.cache {
-					if entry.expiry != nil && entry.expiry.Before(now) {
+					entry.lock.RLock()
+					expiry := entry.expiry
+					entry.lock.RUnlock()
+
+					if expiry != nil && expiry.Before(now) {
 						entry.Close()
 						delete(cache.cache, id)
 					}
@@ -81,6 +100,7 @@ func (cache *TtlCache) startCleaner() {
 		entry.Close()
 		delete(cache.cache, id)
 	}
+	cache.exited <- struct{}{}
 }
 
 func (cache *TtlCache) ensureEntry(id string) (entry *ttlCacheEntry) {
