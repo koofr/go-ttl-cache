@@ -234,6 +234,52 @@ func TestNonCaching(t *testing.T) {
 	}
 }
 
+func TestSetNeverExpires(t *testing.T) {
+	cache := NewTtlCache(10 * time.Millisecond)
+	defer cache.Close()
+
+	cache.Set("foo", 123, NeverExpires)
+
+	val := cache.Get("foo")
+	if val == nil {
+		t.Error("val should be defined")
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	val = cache.Get("foo")
+	if val == nil {
+		t.Error("val should be defined after GC cycle")
+	}
+}
+
+func TestGetOrElseUpdateNeverExpires(t *testing.T) {
+	cache := NewTtlCache(10 * time.Millisecond)
+	defer cache.Close()
+
+	val, err := cache.GetOrElseUpdate("foo", NeverExpires, func() (interface{}, error) {
+		return 123, nil
+	})
+	if err != nil {
+		t.Error(err)
+	}
+	if val != 123 {
+		t.Error("val should be 123 but is ", val)
+	}
+
+	val = cache.Get("foo")
+	if val == nil {
+		t.Error("val should be defined")
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	val = cache.Get("foo")
+	if val == nil {
+		t.Error("val should be defined after GC cycle")
+	}
+}
+
 func TestCleaner(t *testing.T) {
 	cache := NewTtlCache(500 * time.Millisecond)
 	defer cache.Close()

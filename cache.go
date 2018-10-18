@@ -6,6 +6,10 @@ import (
 	"time"
 )
 
+const (
+	NeverExpires = time.Duration(-1)
+)
+
 type ttlCacheEntry struct {
 	value  interface{}
 	expiry *time.Time
@@ -110,7 +114,7 @@ func (cache *TtlCache) Get(id string) interface{} {
 	entry.lock.RLock()
 	defer entry.lock.RUnlock()
 
-	if ok && entry.expiry != nil && entry.expiry.After(time.Now()) {
+	if ok && (entry.expiry == nil || entry.expiry.After(time.Now())) {
 		return entry.value
 	} else {
 		return nil
@@ -118,7 +122,11 @@ func (cache *TtlCache) Get(id string) interface{} {
 }
 
 func (cache *TtlCache) Set(id string, value interface{}, ttl time.Duration) {
-	expiry := time.Now().Add(ttl)
+	var expiry *time.Time
+	if ttl != NeverExpires {
+		expiryTime := time.Now().Add(ttl)
+		expiry = &expiryTime
+	}
 	entry := cache.ensureEntry(id)
 
 	entry.lock.Lock()
@@ -126,7 +134,7 @@ func (cache *TtlCache) Set(id string, value interface{}, ttl time.Duration) {
 
 	entry.Close() // close potential existing
 	entry.value = value
-	entry.expiry = &expiry
+	entry.expiry = expiry
 }
 
 func (cache *TtlCache) Delete(id string) {
@@ -158,7 +166,7 @@ func (cache *TtlCache) GetOrElseUpdate(id string, ttl time.Duration,
 	entry.lock.Lock()
 	defer entry.lock.Unlock()
 
-	if entry.value != nil && entry.expiry != nil && entry.expiry.After(time.Now()) {
+	if entry.value != nil && (entry.expiry == nil || entry.expiry.After(time.Now())) {
 		return entry.value, nil
 	} else {
 		value, err = create()
@@ -174,8 +182,13 @@ func (cache *TtlCache) GetOrElseUpdate(id string, ttl time.Duration,
 		}
 		entry.Close()
 		entry.value = value
-		expiry := time.Now().Add(ttl)
-		entry.expiry = &expiry
+
+		var expiry *time.Time
+		if ttl != NeverExpires {
+			expiryTime := time.Now().Add(ttl)
+			expiry = &expiryTime
+		}
+		entry.expiry = expiry
 	}
 	return
 }
