@@ -214,12 +214,12 @@ func (cache *TtlCache) GetOrElseUpdate(id string, ttl time.Duration,
 }
 
 func (cache *TtlCache) Foreach(f func(string, interface{})) {
-	keys := make([]string, len(cache.cache))
-	i := 0
 	cache.lock.RLock()
-	for key, _ := range cache.cache {
+	i := 0
+	keys := make([]string, len(cache.cache))
+	for key := range cache.cache {
 		keys[i] = key
-		i += 1
+		i++
 	}
 	cache.lock.RUnlock()
 
