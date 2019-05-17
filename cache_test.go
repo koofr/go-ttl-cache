@@ -1,6 +1,7 @@
 package ttlcache
 
 import (
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -548,4 +549,68 @@ func TestDoubleClose(t *testing.T) {
 	if time.Now().Sub(beforeClose) < 60*time.Millisecond {
 		t.Error("close should wait for entries to be closed")
 	}
+}
+
+func TestForeachConcurrency(t *testing.T) {
+	cache := NewTtlCache(min)
+	defer cache.Close()
+
+	cache.Set("foo", 123, min)
+	cache.Set("bar", 456, min)
+	cache.Set("baz", 789, min)
+
+	keys := make([]string, 0)
+	vals := make([]int, 0)
+	ch := make(chan bool)
+
+	go func() {
+		cache.Foreach(func(name string, val interface{}) {
+			keys = append(keys, name)
+			vals = append(vals, val.(int))
+			time.Sleep(3 * time.Second)
+		})
+		ch <- true
+	}()
+
+	time.Sleep(1 * time.Second)
+	cache.Delete("foo")
+	cache.Delete("bar")
+	cache.Delete("baz")
+
+	<-ch
+
+	if len(keys) != 1 || len(vals) != 1 {
+		t.Error("Foreach blocked concurrent operations")
+	}
+
+}
+
+func TestForeach(t *testing.T) {
+	cache := NewTtlCache(min)
+	defer cache.Close()
+
+	cache.Set("foo", 123, min)
+	cache.Set("bar", 456, min)
+	cache.Set("baz", 789, min)
+
+	var keys [3]string
+	var vals [3]int
+	i := 0
+	cache.Foreach(func(name string, val interface{}) {
+		keys[i] = name
+		vals[i] = val.(int)
+		i += 1
+	})
+
+	sort.Strings(keys[:])
+	sort.Ints(vals[:])
+
+	if keys != [3]string{"bar", "baz", "foo"} {
+		t.Error("Foreach did not iterate through all keys")
+	}
+
+	if vals != [3]int{123, 456, 789} {
+		t.Error("Foreach did not iterate through all values")
+	}
+
 }

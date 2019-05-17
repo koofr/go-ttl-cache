@@ -213,6 +213,26 @@ func (cache *TtlCache) GetOrElseUpdate(id string, ttl time.Duration,
 	return
 }
 
+func (cache *TtlCache) Foreach(f func(string, interface{})) {
+	keys := make([]string, len(cache.cache))
+	i := 0
+	cache.lock.RLock()
+	for key, _ := range cache.cache {
+		keys[i] = key
+		i += 1
+	}
+	cache.lock.RUnlock()
+
+	for _, key := range keys {
+		cache.lock.RLock()
+		entry, ok := cache.cache[key]
+		cache.lock.RUnlock()
+		if ok {
+			f(key, entry.value)
+		}
+	}
+}
+
 type DoNotCache struct {
 	Value interface{}
 }
