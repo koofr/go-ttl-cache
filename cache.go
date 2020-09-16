@@ -131,11 +131,11 @@ func (c *TtlCache) Get(id string) interface{} {
 	entry.lock.RLock()
 	defer entry.lock.RUnlock()
 
-	if ok && (entry.expiry == nil || entry.expiry.After(time.Now())) {
-		return entry.value
-	} else {
+	if entry.expiry != nil && !entry.expiry.After(time.Now()) {
 		return nil
 	}
+
+	return entry.value
 }
 
 func (c *TtlCache) Set(id string, value interface{}, ttl time.Duration) {
