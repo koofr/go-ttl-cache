@@ -72,7 +72,7 @@ func (cache *TtlCache) startCleaner() {
 	gcLoop:
 		for {
 			select {
-			case _ = <-cache.exit:
+			case <-cache.exit:
 				ticker.Stop()
 				break gcLoop
 			case now := <-ticker.C:

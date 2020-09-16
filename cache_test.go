@@ -156,12 +156,15 @@ func TestUpdateContention(t *testing.T) {
 		}(i)
 	}
 
-	cache.GetOrElseUpdate("unrelated", min, func() (interface{}, error) {
+	_, err := cache.GetOrElseUpdate("unrelated", min, func() (interface{}, error) {
 		//this should run concurrently with the go-routines from the loop above if
 		// entry level locking works properly
 		time.Sleep(100 * time.Millisecond)
 		return 0, nil
 	})
+	if err != nil {
+		t.Error(err)
+	}
 
 	wg.Wait()
 
@@ -310,10 +313,13 @@ func TestCleaner(t *testing.T) {
 	}
 
 	go func() {
-		cache.GetOrElseUpdate("foo", 250*time.Millisecond, func() (interface{}, error) {
+		_, err := cache.GetOrElseUpdate("foo", 250*time.Millisecond, func() (interface{}, error) {
 			time.Sleep(1000 * time.Millisecond)
 			return "bar", nil
 		})
+		if err != nil {
+			t.Error(err)
+		}
 	}()
 
 	time.Sleep(80 * time.Millisecond)
@@ -429,10 +435,12 @@ func TestCloseOnGetOrElseUpdateTimeout(t *testing.T) {
 	if c1.IsClosed() {
 		t.Error("c1 should not be closed")
 	}
-	cache.GetOrElseUpdate("foo", min,
-		func() (interface{}, error) {
-			return c2, nil
-		})
+	_, err := cache.GetOrElseUpdate("foo", min, func() (interface{}, error) {
+		return c2, nil
+	})
+	if err != nil {
+		t.Error(err)
+	}
 
 	if cache.Get("foo").(*Closer).IsClosed() {
 		t.Error("foo should not be closed")
@@ -475,7 +483,7 @@ func TestCloseOnCacheClose(t *testing.T) {
 		t.Error("c2 should be closed")
 	}
 
-	if time.Now().Sub(beforeClose) < 130*time.Millisecond {
+	if time.Since(beforeClose) < 130*time.Millisecond {
 		t.Error("close should wait for entries to be closed")
 	}
 }
@@ -510,7 +518,7 @@ func TestCloseOnCacheCloseWithGC(t *testing.T) {
 		t.Error("c2 should be closed")
 	}
 
-	if time.Now().Sub(beforeClose) < 60*time.Millisecond {
+	if time.Since(beforeClose) < 60*time.Millisecond {
 		t.Error("close should wait for entries to be closed")
 	}
 }
@@ -546,7 +554,7 @@ func TestDoubleClose(t *testing.T) {
 		t.Error("c2 should be closed")
 	}
 
-	if time.Now().Sub(beforeClose) < 60*time.Millisecond {
+	if time.Since(beforeClose) < 60*time.Millisecond {
 		t.Error("close should wait for entries to be closed")
 	}
 }
