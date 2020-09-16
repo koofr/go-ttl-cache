@@ -13,7 +13,7 @@ const (
 type ttlCacheEntry struct {
 	value  interface{}
 	expiry *time.Time
-	lock   *sync.RWMutex
+	lock   sync.RWMutex
 }
 
 func (e *ttlCacheEntry) Close() {
@@ -26,18 +26,16 @@ func (e *ttlCacheEntry) Close() {
 type TtlCache struct {
 	gcInterval time.Duration
 	cache      map[string]*ttlCacheEntry
-	lock       *sync.RWMutex
+	lock       sync.RWMutex
 	exit       chan struct{}
 	exited     chan struct{}
 	isClosed   bool
 }
 
 func NewTtlCache(gcInterval time.Duration) *TtlCache {
-	var lock sync.RWMutex
 	cache := &TtlCache{
 		gcInterval: gcInterval,
 		cache:      make(map[string]*ttlCacheEntry),
-		lock:       &lock,
 		exit:       make(chan struct{}, 1),
 		exited:     make(chan struct{}, 1),
 		isClosed:   false,
@@ -116,8 +114,7 @@ func (cache *TtlCache) ensureEntry(id string) (entry *ttlCacheEntry) {
 	if ok {
 		return
 	}
-	var lock sync.RWMutex
-	entry = &ttlCacheEntry{lock: &lock}
+	entry = &ttlCacheEntry{}
 	cache.cache[id] = entry
 	return
 }
