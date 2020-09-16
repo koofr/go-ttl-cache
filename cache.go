@@ -33,96 +33,96 @@ type TtlCache struct {
 }
 
 func NewTtlCache(gcInterval time.Duration) *TtlCache {
-	cache := &TtlCache{
+	c := &TtlCache{
 		gcInterval: gcInterval,
 		cache:      make(map[string]*ttlCacheEntry),
 		exit:       make(chan struct{}, 1),
 		exited:     make(chan struct{}, 1),
 		isClosed:   false,
 	}
-	go cache.startCleaner()
-	return cache
+	go c.startCleaner()
+	return c
 }
 
-func (cache *TtlCache) Close() {
-	cache.lock.RLock()
-	isClosed := cache.isClosed
-	cache.lock.RUnlock()
+func (c *TtlCache) Close() {
+	c.lock.RLock()
+	isClosed := c.isClosed
+	c.lock.RUnlock()
 
 	if isClosed {
 		return
 	}
 
-	cache.lock.Lock()
-	cache.isClosed = true
-	cache.lock.Unlock()
+	c.lock.Lock()
+	c.isClosed = true
+	c.lock.Unlock()
 
-	cache.exit <- struct{}{}
-	<-cache.exited
+	c.exit <- struct{}{}
+	<-c.exited
 }
 
-func (cache *TtlCache) startCleaner() {
-	if cache == nil {
+func (c *TtlCache) startCleaner() {
+	if c == nil {
 		return
 	}
-	if cache.gcInterval > 0 {
-		ticker := time.NewTicker(cache.gcInterval)
+	if c.gcInterval > 0 {
+		ticker := time.NewTicker(c.gcInterval)
 	gcLoop:
 		for {
 			select {
-			case <-cache.exit:
+			case <-c.exit:
 				ticker.Stop()
 				break gcLoop
 			case now := <-ticker.C:
-				if cache == nil {
+				if c == nil {
 					return
 				}
-				cache.lock.Lock()
-				for id, entry := range cache.cache {
+				c.lock.Lock()
+				for id, entry := range c.cache {
 					entry.lock.RLock()
 					expiry := entry.expiry
 					entry.lock.RUnlock()
 
 					if expiry != nil && expiry.Before(now) {
 						entry.Close()
-						delete(cache.cache, id)
+						delete(c.cache, id)
 					}
 				}
-				cache.lock.Unlock()
+				c.lock.Unlock()
 			}
 		}
 	} else {
-		<-cache.exit
+		<-c.exit
 	}
-	for id, entry := range cache.cache {
+	for id, entry := range c.cache {
 		entry.Close()
-		delete(cache.cache, id)
+		delete(c.cache, id)
 	}
-	cache.exited <- struct{}{}
+	c.exited <- struct{}{}
 }
 
-func (cache *TtlCache) ensureEntry(id string) (entry *ttlCacheEntry) {
-	cache.lock.RLock()
-	entry, ok := cache.cache[id]
-	cache.lock.RUnlock()
+func (c *TtlCache) ensureEntry(id string) (entry *ttlCacheEntry) {
+	c.lock.RLock()
+	entry, ok := c.cache[id]
+	c.lock.RUnlock()
 	if ok {
 		return
 	}
-	cache.lock.Lock()
-	defer cache.lock.Unlock()
-	entry, ok = cache.cache[id]
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	entry, ok = c.cache[id]
 	if ok {
 		return
 	}
 	entry = &ttlCacheEntry{}
-	cache.cache[id] = entry
+	c.cache[id] = entry
 	return
 }
 
-func (cache *TtlCache) Get(id string) interface{} {
-	cache.lock.RLock()
-	entry, ok := cache.cache[id]
-	cache.lock.RUnlock()
+func (c *TtlCache) Get(id string) interface{} {
+	c.lock.RLock()
+	entry, ok := c.cache[id]
+	c.lock.RUnlock()
 
 	if !ok {
 		return nil
@@ -138,13 +138,13 @@ func (cache *TtlCache) Get(id string) interface{} {
 	}
 }
 
-func (cache *TtlCache) Set(id string, value interface{}, ttl time.Duration) {
+func (c *TtlCache) Set(id string, value interface{}, ttl time.Duration) {
 	var expiry *time.Time
 	if ttl != NeverExpires {
 		expiryTime := time.Now().Add(ttl)
 		expiry = &expiryTime
 	}
-	entry := cache.ensureEntry(id)
+	entry := c.ensureEntry(id)
 
 	entry.lock.Lock()
 	defer entry.lock.Unlock()
@@ -154,32 +154,32 @@ func (cache *TtlCache) Set(id string, value interface{}, ttl time.Duration) {
 	entry.expiry = expiry
 }
 
-func (cache *TtlCache) Delete(id string) {
-	cache.lock.Lock()
+func (c *TtlCache) Delete(id string) {
+	c.lock.Lock()
 
-	elem, ok := cache.cache[id]
+	elem, ok := c.cache[id]
 	if !ok {
-		cache.lock.Unlock()
+		c.lock.Unlock()
 
 		return
 	}
 
-	delete(cache.cache, id)
+	delete(c.cache, id)
 
-	cache.lock.Unlock()
+	c.lock.Unlock()
 
 	elem.Close()
 }
 
-func (cache *TtlCache) GetOrElseUpdate(id string, ttl time.Duration,
+func (c *TtlCache) GetOrElseUpdate(id string, ttl time.Duration,
 	create func() (interface{}, error)) (value interface{}, err error) {
 
-	value = cache.Get(id)
+	value = c.Get(id)
 	if value != nil {
 		return
 	}
 
-	entry := cache.ensureEntry(id)
+	entry := c.ensureEntry(id)
 	entry.lock.Lock()
 	defer entry.lock.Unlock()
 
@@ -210,20 +210,20 @@ func (cache *TtlCache) GetOrElseUpdate(id string, ttl time.Duration,
 	return
 }
 
-func (cache *TtlCache) Foreach(f func(string, interface{})) {
-	cache.lock.RLock()
+func (c *TtlCache) Foreach(f func(string, interface{})) {
+	c.lock.RLock()
 	i := 0
-	keys := make([]string, len(cache.cache))
-	for key := range cache.cache {
+	keys := make([]string, len(c.cache))
+	for key := range c.cache {
 		keys[i] = key
 		i++
 	}
-	cache.lock.RUnlock()
+	c.lock.RUnlock()
 
 	for _, key := range keys {
-		cache.lock.RLock()
-		entry, ok := cache.cache[key]
-		cache.lock.RUnlock()
+		c.lock.RLock()
+		entry, ok := c.cache[key]
+		c.lock.RUnlock()
 		if ok {
 			f(key, entry.value)
 		}
