@@ -138,18 +138,22 @@ func (c *TtlCache) Get(id string) interface{} {
 	return entry.value
 }
 
-func (c *TtlCache) Set(id string, value interface{}, ttl time.Duration) {
-	var expiry *time.Time
-	if ttl != NeverExpires {
-		expiryTime := time.Now().Add(ttl)
-		expiry = &expiryTime
+func (c *TtlCache) getExpiry(ttl time.Duration) *time.Time {
+	if ttl == NeverExpires {
+		return nil
 	}
+	expiry := time.Now().Add(ttl)
+	return &expiry
+}
+
+func (c *TtlCache) Set(id string, value interface{}, ttl time.Duration) {
+	expiry := c.getExpiry(ttl)
 	entry := c.ensureEntry(id)
 
 	entry.lock.Lock()
 	defer entry.lock.Unlock()
 
-	entry.Close() // close potential existing
+	entry.Close() // close potential existing value
 	entry.value = value
 	entry.expiry = expiry
 }
@@ -171,9 +175,11 @@ func (c *TtlCache) Delete(id string) {
 	elem.Close()
 }
 
-func (c *TtlCache) GetOrElseUpdate(id string, ttl time.Duration,
-	create func() (interface{}, error)) (value interface{}, err error) {
-
+func (c *TtlCache) GetOrElseUpdate(
+	id string,
+	ttl time.Duration,
+	create func() (interface{}, error),
+) (value interface{}, err error) {
 	value = c.Get(id)
 	if value != nil {
 		return
@@ -208,6 +214,29 @@ func (c *TtlCache) GetOrElseUpdate(id string, ttl time.Duration,
 		entry.expiry = expiry
 	}
 	return
+}
+
+func (c *TtlCache) UpdateTTL(id string, ttl time.Duration) bool {
+	expiry := c.getExpiry(ttl)
+
+	c.lock.RLock()
+	entry, ok := c.cache[id]
+	c.lock.RUnlock()
+
+	if !ok {
+		return false
+	}
+
+	entry.lock.RLock()
+	defer entry.lock.RUnlock()
+
+	if entry.expiry != nil && !entry.expiry.After(time.Now()) {
+		return false
+	}
+
+	entry.expiry = expiry
+
+	return true
 }
 
 func (c *TtlCache) Foreach(f func(string, interface{})) {

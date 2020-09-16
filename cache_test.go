@@ -304,6 +304,45 @@ func TestGetOrElseUpdateNeverExpires(t *testing.T) {
 	}
 }
 
+func TestUpdateTTL(t *testing.T) {
+	cache := NewTtlCache(10 * time.Millisecond)
+	defer cache.Close()
+
+	val, err := cache.GetOrElseUpdate("foo", NeverExpires, func() (interface{}, error) {
+		return 123, nil
+	})
+	if err != nil {
+		t.Error(err)
+	}
+	if val != 123 {
+		t.Error("val should be 123 but is ", val)
+	}
+
+	val = cache.Get("foo")
+	if val == nil {
+		t.Error("val should be defined")
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	val = cache.Get("foo")
+	if val == nil {
+		t.Error("val should be defined after GC cycle")
+	}
+
+	updated := cache.UpdateTTL("foo", 10*time.Millisecond)
+	if !updated {
+		t.Error("updated should be true")
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	val = cache.Get("foo")
+	if val != nil {
+		t.Error("val should not be defined")
+	}
+}
+
 func TestCleaner(t *testing.T) {
 	cache := NewTtlCache(500 * time.Millisecond)
 	defer cache.Close()
