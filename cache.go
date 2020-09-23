@@ -227,8 +227,8 @@ func (c *TtlCache) UpdateTTL(id string, ttl time.Duration) bool {
 		return false
 	}
 
-	entry.lock.RLock()
-	defer entry.lock.RUnlock()
+	entry.lock.Lock()
+	defer entry.lock.Unlock()
 
 	if entry.expiry != nil && !entry.expiry.After(time.Now()) {
 		return false
