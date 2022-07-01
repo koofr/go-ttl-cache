@@ -3,6 +3,7 @@ package ttlcache
 import (
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -11,9 +12,10 @@ const (
 )
 
 type ttlCacheEntry struct {
-	value  interface{}
-	expiry *time.Time
-	lock   sync.RWMutex
+	value       interface{}
+	expiry      *time.Time
+	lock        sync.RWMutex
+	initialized int64
 }
 
 func (e *ttlCacheEntry) Close() {
@@ -77,18 +79,7 @@ func (c *TtlCache) startCleaner() {
 				if c == nil {
 					return
 				}
-				c.lock.Lock()
-				for id, entry := range c.cache {
-					entry.lock.RLock()
-					expiry := entry.expiry
-					entry.lock.RUnlock()
-
-					if expiry != nil && expiry.Before(now) {
-						entry.Close()
-						delete(c.cache, id)
-					}
-				}
-				c.lock.Unlock()
+				c.cleanerClean(now)
 			}
 		}
 	} else {
@@ -99,6 +90,37 @@ func (c *TtlCache) startCleaner() {
 		delete(c.cache, id)
 	}
 	c.exited <- struct{}{}
+}
+
+func (c *TtlCache) cleanerClean(now time.Time) {
+	// only delete entries that are initialized because RLock-ing an entry's lock
+	// might lock the whole cache
+	c.lock.Lock()
+
+	entries := []*ttlCacheEntry{}
+
+	for id, entry := range c.cache {
+		if atomic.LoadInt64(&entry.initialized) != 1 {
+			// do not try to acquire the entry's lock if the entry is not yet
+			// initialized
+			continue
+		}
+
+		entry.lock.RLock()
+		expiry := entry.expiry
+		entry.lock.RUnlock()
+
+		if expiry != nil && expiry.Before(now) {
+			entries = append(entries, entry)
+			delete(c.cache, id)
+		}
+	}
+
+	c.lock.Unlock()
+
+	for _, entry := range entries {
+		entry.Close()
+	}
 }
 
 func (c *TtlCache) ensureEntry(id string) (entry *ttlCacheEntry) {
@@ -155,6 +177,7 @@ func (c *TtlCache) Set(id string, value interface{}, ttl time.Duration) {
 
 	entry.Close() // close potential existing value
 	entry.value = value
+	atomic.StoreInt64(&entry.initialized, 1)
 	entry.expiry = expiry
 }
 
@@ -182,7 +205,7 @@ func (c *TtlCache) GetOrElseUpdate(
 ) (value interface{}, err error) {
 	value = c.Get(id)
 	if value != nil {
-		return
+		return value, nil
 	}
 
 	entry := c.ensureEntry(id)
@@ -191,29 +214,31 @@ func (c *TtlCache) GetOrElseUpdate(
 
 	if entry.value != nil && (entry.expiry == nil || entry.expiry.After(time.Now())) {
 		return entry.value, nil
-	} else {
-		value, err = create()
-		if err != nil {
-			nonCached, ok := IsDoNotCache(err)
-			if ok {
-				expiry := time.Unix(0, 0)
-				entry.expiry = &expiry //will be GCed if nobody else is using it
-				value = nonCached
-				err = nil
-			}
-			return
-		}
-		entry.Close()
-		entry.value = value
-
-		var expiry *time.Time
-		if ttl != NeverExpires {
-			expiryTime := time.Now().Add(ttl)
-			expiry = &expiryTime
-		}
-		entry.expiry = expiry
 	}
-	return
+
+	value, err = create()
+	if err != nil {
+		nonCached, ok := IsDoNotCache(err)
+		if ok {
+			expiry := time.Unix(0, 0)
+			entry.expiry = &expiry //will be GCed if nobody else is using it
+			value = nonCached
+			err = nil
+		}
+		return value, err
+	}
+	entry.Close()
+	entry.value = value
+	atomic.StoreInt64(&entry.initialized, 1)
+
+	var expiry *time.Time
+	if ttl != NeverExpires {
+		expiryTime := time.Now().Add(ttl)
+		expiry = &expiryTime
+	}
+	entry.expiry = expiry
+
+	return value, nil
 }
 
 func (c *TtlCache) UpdateTTL(id string, ttl time.Duration) bool {

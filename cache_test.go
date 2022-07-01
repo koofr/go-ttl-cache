@@ -386,6 +386,51 @@ func TestCleaner(t *testing.T) {
 	cache.lock.Unlock()
 }
 
+func TestCleanerBlocked(t *testing.T) {
+	cache := NewTtlCache(500 * time.Millisecond)
+	defer cache.Close()
+
+	_, err := cache.GetOrElseUpdate("foo", 50*time.Millisecond, func() (interface{}, error) {
+		return "123", nil
+	})
+	if err != nil {
+		t.Error(err)
+	}
+
+	cache.lock.Lock()
+	if _, ok := cache.cache["foo"]; !ok {
+		t.Error("val should be defined")
+	}
+	cache.lock.Unlock()
+
+	go func() {
+		_, err := cache.GetOrElseUpdate("bar", 250*time.Millisecond, func() (interface{}, error) {
+			time.Sleep(1500 * time.Millisecond)
+			return "456", nil
+		})
+		if err != nil {
+			t.Error(err)
+		}
+	}()
+
+	time.Sleep(700 * time.Millisecond)
+
+	start := time.Now()
+
+	cache.lock.Lock()
+	if _, ok := cache.cache["foo"]; ok {
+		t.Error("val should not be defined")
+	}
+	if _, ok := cache.cache["bar"]; !ok {
+		t.Error("val should be defined")
+	}
+	cache.lock.Unlock()
+
+	if duration := time.Since(start); duration > 100*time.Millisecond {
+		t.Error("cleaner should not block on non-initialized entries")
+	}
+}
+
 func TestDisabledCleaner(t *testing.T) {
 	cache := NewTtlCache(0)
 	defer cache.Close()
@@ -629,7 +674,6 @@ func TestForeachConcurrency(t *testing.T) {
 	if len(keys) != 1 || len(vals) != 1 {
 		t.Error("Foreach blocked concurrent operations")
 	}
-
 }
 
 func TestForeach(t *testing.T) {
