@@ -1,3 +1,3 @@
 module github.com/koofr/go-ttl-cache
 
-go 1.13
+go 1.21
